@@ -47,7 +47,17 @@ app.get("/", (req, res) => {
 
 app.use("/api/users", userRoutes); // Your user routes (should be AFTER Passport config)
 app.use("/api/cards", cardRouter); // Register the card router
-
+app.use((err, req, res, next) => {
+    if (err && err.name === 'UnauthorizedError') { // Or similar specific Passport error handling
+        return res.status(401).json({ message: 'Authentication required or invalid token.' });
+    }
+    // Generic error handler
+    if (err) {
+        console.error(err.stack); // Log the error stack for debugging
+        return res.status(500).json({ message: 'Something broke!' });
+    }
+    next();
+});
 // --- Start the Server ---
 app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);

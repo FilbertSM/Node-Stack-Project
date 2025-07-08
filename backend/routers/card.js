@@ -1,11 +1,22 @@
 import express from 'express';
 const router = express.Router();
 import Card from '../modules/card.model.js';
+import passport from 'passport'; // Import passport
+
+// All routes below will now require JWT authentication
 
 // Create Card
-router.post('/', async(req, res) => {
+// Only authenticated users can create cards, and the card will be linked to them.
+router.post('/', passport.authenticate('jwt', { session: false }), async(req, res) => {
     try {
-        const card = new Card(req.body);
+        const { title, description, status } = req.body;
+        // Ensure the user ID from the authenticated session is used
+        const card = new Card({
+            title,
+            description,
+            status,
+            user: req.user._id, // Assign the card to the authenticated user
+        });
         await card.save();
         res.status(201).json(card);
     } catch (err) {
@@ -13,21 +24,24 @@ router.post('/', async(req, res) => {
     }
 });
 
-// Read All Cards
-router.get('/', async(req, res) => {
+// Read All Cards for the authenticated user
+// Only retrieves cards belonging to the logged-in user.
+router.get('/', passport.authenticate('jwt', { session: false }), async(req, res) => {
     try {
-        const cards = await Card.find().sort({ timestamp: -1 });
+        const cards = await Card.find({ user: req.user._id }).sort({ timestamp: -1 }); // Filter by user ID
         res.json(cards);
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
 });
 
-// Read Single Card
-router.get('/:id', async(req, res) => {
+// Read Single Card by ID for the authenticated user
+// Retrieves a specific card only if it belongs to the logged-in user.
+router.get('/:id', passport.authenticate('jwt', { session: false }), async(req, res) => {
     try {
-        const card = await Card.findById(req.params.id);
-        if (!card) return res.status(404).json({ error: 'Card not found' });
+        // Find by _id AND user ID to ensure ownership
+        const card = await Card.findOne({ _id: req.params.id, user: req.user._id });
+        if (!card) return res.status(404).json({ error: 'Card not found or not owned by user' });
         res.json(card);
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -35,10 +49,13 @@ router.get('/:id', async(req, res) => {
 });
 
 // Update Card
-router.put('/:id', async(req, res) => {
+// Updates a card only if it belongs to the authenticated user.
+router.put('/:id', passport.authenticate('jwt', { session: false }), async(req, res) => {
     try {
-        const card = await Card.findByIdAndUpdate(req.params.id, req.body, { new: true });
-        if (!card) return res.status(404).json({ error: 'Card not found' });
+        const { title, description, status } = req.body;
+        // Find and update by _id AND user ID to ensure ownership
+        const card = await Card.findOneAndUpdate({ _id: req.params.id, user: req.user._id }, { title, description, status }, { new: true });
+        if (!card) return res.status(404).json({ error: 'Card not found or not owned by user' });
         res.json(card);
     } catch (err) {
         res.status(400).json({ error: err.message });
@@ -46,11 +63,13 @@ router.put('/:id', async(req, res) => {
 });
 
 // Delete Card
-router.delete('/:id', async(req, res) => {
+// Deletes a card only if it belongs to the authenticated user.
+router.delete('/:id', passport.authenticate('jwt', { session: false }), async(req, res) => {
     try {
-        const card = await Card.findByIdAndDelete(req.params.id);
-        if (!card) return res.status(404).json({ error: 'Card not found' });
-        res.json({ message: 'Card deleted' });
+        // Find and delete by _id AND user ID to ensure ownership
+        const card = await Card.findOneAndDelete({ _id: req.params.id, user: req.user._id });
+        if (!card) return res.status(404).json({ error: 'Card not found or not owned by user' });
+        res.json({ message: 'Card deleted successfully' });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }

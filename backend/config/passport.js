@@ -1,4 +1,3 @@
-// node-stack/backend/config/passport.js
 import { Strategy as LocalStrategy } from "passport-local";
 import { Strategy as JwtStrategy, ExtractJwt } from "passport-jwt"; // Import JWT Strategy
 import User from "../modules/users.module.js"; // Adjust path to your User model
@@ -38,32 +37,28 @@ const passportConfig = (passport) => {
     // JWT Strategy for token-based authentication
     passport.use(
         new JwtStrategy({
-                // Extract JWT from cookies (assuming your token is in an httpOnly cookie)
                 jwtFromRequest: (req) => {
                     let token = null;
                     if (req && req.cookies) {
-                        token = req.cookies.token;
+                        token = req.cookies.token; // Correctly looking for a cookie named 'token'
                     }
                     return token;
                 },
-                secretOrKey: process.env.JWT_SECRET_KEY, // Your secret key from .env
+                secretOrKey: process.env.JWT_SECRET_KEY,
             },
             async(jwt_payload, done) => {
                 try {
-                    // Find the user based on the ID in the JWT payload
-                    // Exclude password from the returned user object for security
                     const user = await User.findById(jwt_payload._id).select("-password");
-
                     if (user) {
-                        return done(null, user); // User found, authentication successful
+                        return done(null, user);
                     } else {
-                        return done(null, false); // User not found
+                        // This path means the JWT was valid, but the user ID in the payload doesn't exist
+                        return done(null, false, { message: "User not found." });
                     }
                 } catch (error) {
-                    return done(error, false); // Error during authentication
+                    return done(error, false); // Database or other server error during user lookup
                 }
-            }
-        )
+            })
     );
 
     // Passport Session Management (required by Passport, even with JWT)

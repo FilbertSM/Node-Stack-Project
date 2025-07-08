@@ -12,49 +12,60 @@ const router = Router();
 // @desc    Register a new user (Signup)
 // @route   POST /api/users/signup
 // @access  Public
-router.post("/signup", async(req, res) => {
-    const { email, username, password } = req.body;
-
-    if (!email || !username || !password) {
-        return res
-            .status(400)
-            .json({ message: "Please provide all required fields." });
-    }
-
-    try {
-        // Check if user already exists by email or username
-        let userExists = await User.findOne({ $or: [{ email }, { username }] });
-        if (userExists) {
-            return res
-                .status(400)
-                .json({ message: "User with that email or username already exists." });
+router.post("/login", (req, res, next) => {
+    // Custom callback for passport.authenticate to handle responses explicitly
+    passport.authenticate("local", { session: false }, (err, user, info) => {
+        // Step 1: Handle any server-side errors during authentication process
+        if (err) {
+            console.error("Passport Local Strategy Error:", err);
+            // Don't send sensitive error details to the client directly unless for debugging
+            return res.status(500).json({ message: "An unexpected server error occurred during login." });
         }
 
-        // Create a new user instance (password hashing handled by pre-save hook in model)
-        const newUser = new User({
-            username,
-            email,
-            password,
-            registerType: "normal", // Explicitly set provider for local users
-        });
+        // Step 2: Handle authentication failure (user not found or password incorrect)
+        if (!user) {
+            // 'info' object from 'done(null, false, info)' contains the message
+            const errorMessage = info && info.message ? info.message : "Authentication failed. Please check your credentials.";
+            return res.status(401).json({ message: errorMessage });
+        }
 
-        // Save the user to the database
-        const savedUser = await newUser.save();
+        // Step 3: Handle successful authentication
+        // Log in the user to establish a session, even if session: false. This populates req.user.
+        req.logIn(user, { session: false }, (loginErr) => {
+            if (loginErr) {
+                console.error("Error during req.logIn:", loginErr);
+                return res.status(500).json({ message: "An error occurred after successful authentication." });
+            }
 
-        // Respond with success
-        res.status(201).json({
-            message: "User registered successfully.",
-            user: {
-                id: savedUser._id,
-                username: savedUser.username,
-                email: savedUser.email,
-            },
+            // User is successfully authenticated, generate JWT
+            const payload = { _id: user._id }; // Use 'user._id' directly
+
+            const token = jwt.sign(payload, process.env.JWT_SECRET_KEY, {
+                expiresIn: "1d",
+            });
+
+            // Set the JWT token as an HTTP-only cookie
+            res.cookie("token", token, {
+                httpOnly: true,
+                maxAge: 1000 * 60 * 60 * 24, // 1 day
+                // secure: process.env.NODE_ENV === 'production', // Uncomment in production for HTTPS
+                // sameSite: 'strict' // CSRF protection
+            });
+
+            // Send success response with user details (excluding password)
+            const userToSend = {
+                _id: user._id,
+                username: user.username,
+                email: user.email,
+                registerType: user.registerType,
+                socialId: user.socialId,
+            };
+            return res.json({ message: "Login successful!", user: userToSend });
         });
-    } catch (error) {
-        console.error("Error during user signup:", error);
-        res.status(500).json({ message: "Server error during signup." });
-    }
+    })(req, res, next); // IMPORTANT: Invoke the middleware chain
 });
+
+
 
 // @desc    Authenticate user (Login)
 // @route   POST /api/users/login
@@ -112,18 +123,46 @@ router.post("/logout", (req, res) => {
 // @access  Private (requires authentication)
 router.get(
     "/profile",
-    // Use Passport's JWT strategy to protect this route
     passport.authenticate("jwt", { session: false }),
-    (req, res) => {
-        // req.user is available here because Passport's JWT strategy populated it
-        res.json({
-            id: req.user._id,
-            username: req.user.username,
-            email: req.user.email,
-            registerType: req.user.registerType,
-            socialId: req.user.socialId,
-            createdAt: req.user.createdAt,
-        });
+    async(req, res) => {
+        try {
+            // req.user is populated by passport.authenticate if JWT is valid
+            if (!req.user) {
+                // This case should ideally be caught by passport.authenticate itself
+                // but as a fallback, ensure we send JSON
+                return res.status(401).json({ message: "Not authenticated for profile access." });
+            }
+
+            // If authenticated, send user data
+            res.json({
+                id: req.user._id,
+                username: req.user.username,
+                email: req.user.email,
+                registerType: req.user.registerType,
+                socialId: req.user.socialId,
+                createdAt: req.user.createdAt,
+            });
+        } catch (err) {
+            console.error("Error fetching user profile:", err);
+            // Send a JSON error response for internal server errors
+            res.status(500).json({ message: "Server error while fetching profile." });
+        }
+    }
+);
+
+// @desc    Get all users
+// @route   GET /api/users
+// @access  Private (requires authentication)
+router.get(
+    "/",
+    passport.authenticate("jwt", { session: false }),
+    async(req, res) => {
+        try {
+            const users = await User.find().sort({ createdAt: -1 });
+            res.json(users);
+        } catch (err) {
+            res.status(500).json({ error: err.message });
+        }
     }
 );
 
